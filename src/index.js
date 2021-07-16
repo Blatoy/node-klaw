@@ -11,7 +11,8 @@ function Walker (dir, options) {
     pathSorter: undefined,
     filter: undefined,
     depthLimit: undefined,
-    preserveSymlinks: false
+    preserveSymlinks: false,
+    stopOnError: false
   }
   options = Object.assign(defaultOpts, options, defaultStreamOptions)
 
@@ -33,27 +34,36 @@ Walker.prototype._read = function () {
 
   statFunction(pathItem, function (err, stats) {
     var item = { path: pathItem, stats: stats }
-    if (err) return self.emit('error', err, item)
-
-    if (!stats.isDirectory() || (self.rootDepth &&
-      pathItem.split(path.sep).length - self.rootDepth >= self.options.depthLimit)) {
-      return self.push(item)
+    if (err) {
+      var emitResult = self.emit('error', err, item)
+      if (self.options.stopOnError) {
+        return emitResult;
+      }
+      self.push(false)
     }
-
-    self.fs.readdir(pathItem, function (err, pathItems) {
-      if (err) {
-        self.push(item)
-        return self.emit('error', err, item)
+    else {
+      if (!stats.isDirectory() || (self.rootDepth && pathItem.split(path.sep).length - self.rootDepth >= self.options.depthLimit)) {
+        return self.push(item)
       }
 
-      pathItems = pathItems.map(function (part) { return path.join(pathItem, part) })
-      if (self.options.filter) pathItems = pathItems.filter(self.options.filter)
-      if (self.options.pathSorter) pathItems.sort(self.options.pathSorter)
-      // faster way to do do incremental batch array pushes
-      self.paths.push.apply(self.paths, pathItems)
-
-      self.push(item)
-    })
+      self.fs.readdir(pathItem, function (err, pathItems) {
+        if (err) {
+          self.push(false)
+          var emitResult = self.emit('error', err, item)
+          if (self.options.stopOnError) {
+            return emitResult;
+          }
+        }
+        else {
+          pathItems = pathItems.map(function (part) { return path.join(pathItem, part) })
+          if (self.options.filter) pathItems = pathItems.filter(self.options.filter)
+          if (self.options.pathSorter) pathItems.sort(self.options.pathSorter)
+          // faster way to do do incremental batch array pushes
+          self.paths.push.apply(self.paths, pathItems)
+          self.push(item)
+        }
+      })
+    }
   })
 }
 
